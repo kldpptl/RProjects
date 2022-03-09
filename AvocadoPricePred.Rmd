@@ -1,0 +1,1019 @@
+---
+title: "Avocado Price Prediction"
+author: "KuldeepPatel"
+date: "17/02/2022"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    fig_width: 7
+    fig_height: 6
+    fig_caption: true
+    df_print: kable
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+![](images/1_opzxrBna63YDbd8_pM5trw.png)
+
+
+In this kernel we will forecast using the time series in R. In this project, I will brief regarding the terms used and steps taken for the Forecasting Project.
+
+#### Reference:
+
+- Forecasting: Principles and Practice by Rob J Hyndman and George Athanasopoulos
+
+#### Terms to Know:
+
+- **Explanatory model:** Is a model that adds variables into our model not only based on past historical prices (in this case Avocados prices), but uses other variables to make accurate predictions.
+- **Time Series Model:** Is a model that only uses past information (in this case past avocado prices) to make accurate predictions.
+
+#### Steps for our Forecasting Project:
+- **Determine what is the problem:** In this case we want to have accurate forecast of Avocado prices.
+- **Gathering information:** Understand what was the process that was used to gather the information and if the information is sufficient to have effective predictive models.
+- **Implementing Exploratory Analysis:** Determine if there are any sort of patterns in our data before going into building the models.
+- **Choosing predictive models:** This is the phase were we decide which model is the most appropriate to make our forecasting most effective.
+- **Testing our model:** Analyze if our model is effective enough to make effective predictions.
+
+```{r echo=FALSE, message = FALSE}
+#  Import Packages
+#if (!require("pacman")) install.packages("pacman") 
+#pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, caret, randomForest, e1071, rpart, 
+#                xgboost, h2o, corrplot, rpart.plot, corrgram, ggplot2, highcharter, 
+#                ggthemes, psych, scales, treemap, treemapify, repr, cowplot, magrittr, ggpubr,
+#                RColorBrewer, plotrix, ggrepel, tidyverse, gridExtra, lubridate)
+
+library(tidyverse)
+library(skimr)
+library(GGally)
+library(viridis)
+library(caret)
+library(e1071)
+library(rpart)
+library(xgboost)
+library(corrplot)
+library(corrgram)
+library(ggplot2)
+library(ggthemes)
+library(psych)
+library(scales)
+library(treemap)
+library(repr)
+library(cowplot)
+library(magrittr)
+library(ggpubr)
+library(RColorBrewer)
+library(plotrix)
+library(ggrepel)
+library(gridExtra)
+library(lubridate)
+library(tibbletime)
+library(reshape2)
+library(tidyr)
+library(ggpubr)
+library(grid)
+library(smooth)
+library(forecast)
+library(fpp2)
+library(knitr)
+list.files(path = "../AvacadoPricePattern/data")
+```
+This dataset contains the details of all sale made by type of avocado, season it was sold in.
+
+### Exploratory Data Analysis:
+In this phase of the project we will concentrate mainly on two aspects of the time series forecasting analysis which consists of:
+
+- **Seasonal Patterns:** In this section we will focus on constant patterns that occur frequently from year to year and from month to month in both types of avocados conventional and organic.
+- **Cyclical Patterns:** This section will require me to search deeper into what factors could have affected the price of avocados during those years (low supply, storms etc.) and will be interesting to see if any of those factors contributed to any significant price changes.
+
+```{r, echo=FALSE}
+df <- read.csv("../AvacadoPricePattern/data/avocado.csv")
+original_df <- df
+levels(factor(df$type))
+```
+
+```{r echo=FALSE, split=FALSE, fig.align = 'default', fig.cap="Plot of Avocado price by type", warning = FALSE, out.width="100%"}
+# Density plots of the different type of avocados.
+# ggplot(mammals, aes(x = sleep_total, fill = vore)) +
+#   geom_density(col = NA, alpha = 0.35, trim = TRUE)
+options(repr.plot.width=8, repr.plot.height=4)
+
+ggplot(df, aes(x=AveragePrice, fill=type)) + geom_density() + facet_wrap(~type) + theme_minimal() + 
+theme(plot.title=element_text(hjust=0.5), legend.position="bottom") + labs(title="Avocado Price by Type") + scale_fill_brewer(palette="Set2")
+```
+```{r echo=FALSE,}
+vol_type <- df %>% group_by(type) %>% summarise(avg.vol=mean(Total.Volume))  %>% mutate(pct=prop.table(avg.vol) * 100)
+vol_type %>% kable(caption = "Table for Volume trend by Avocado type")
+```
+
+### Type of Avocados:
+In this section we will analyze the different types of avocados that we have in this dataset. Basically, we have two types of avocados:
+
+- **Conventional**
+- **Organic**
+
+```{r echo=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Change the date column from factor to date
+df$Date <- as.Date(df$Date, "%Y-%m-%d")
+class(df$Date)
+
+# Sort the dates
+df <- df[order(as.Date(df$Date, format="%Y-%m-%d")),]
+
+
+price_trend <- df %>% select(Date, AveragePrice, type) %>%
+  ggplot(aes(x=Date, y=AveragePrice)) + geom_area(aes(color=type, fill=type), alpha = 0.3, position = position_dodge(0.8)) + 
+  theme_minimal() +  scale_color_manual(values = c("#ED7921", "#62BE51")) + scale_fill_manual(values = c("#FD833E", "#B8FC5F"))
+
+price_trend
+
+# Create a Facet Wrap for each product
+ggplot(data = df, aes(x = Date, y = AveragePrice, col=type)) +
+  geom_line() +
+  facet_wrap(~ type) + theme_minimal() + theme(legend.position="bottom")
+
+```
+
+#### Summary:
+- **Organic avocados:** Based on the price changes throughout time we can see that they are **more** expensive.
+- **Conventional avocados:** Based on price changes throughout time we can see that they are **less** expensive.
+
+### Relationship between Prices and Total Volume:
+
+In this phase we will analyze the impact supply has on the price of avocados as a whole. Normally, there is an inverse relationship between supply and prices. When there is an overproduction of avocados they will have a negative impact on the market price of avocados. Let's see if this is the case for both conventional and organic avocados.
+
+- **Conventional:** At the end of 2017 we can see a large drop in prices, at the same time there is an increasing amount of volume of avocados in the market.
+- **Organic:** Same happens with organic avocados, at the end of 2017 there is a big drop and we can see a huge increase in volume.
+- **Volume peaks:** Notice how each volume peak is a signal for an upcoming **drop** in avocado prices.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Filter by type
+organic <- df %>% select(Date, AveragePrice, type, Total.Volume) %>% filter(type == "organic")
+conventional <- df %>% select(Date, AveragePrice, type, Total.Volume) %>% filter(type == "conventional")
+
+organic <- as_tbl_time(organic, index=Date)
+organic <- as_period(organic, '1 month')
+
+# Conventional Avocados
+conventional <- as_tbl_time(conventional, index=Date)
+conventional <- as_period(conventional, '1 month')
+
+head(conventional)%>%kable(caption="Head of Conventional")
+
+# Now let's show monthly avocados price
+
+options(repr.plot.width=8, repr.plot.height=6)
+conventional_monthly <- conventional %>%
+  ggplot(aes(x=Date, y=AveragePrice)) + geom_line(color="#7FB3D5") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#D5D8DC")) + 
+  labs(title="Conventional Avocados") + geom_hline(yintercept=max(conventional$AveragePrice), linetype="dashed", color = "red") + 
+  geom_hline(yintercept=min(conventional$AveragePrice), linetype="dashed", color = "blue")
+
+# Let's create a volume chart
+conventional_volume <- conventional %>%
+  ggplot(aes(x=Date, y=Total.Volume)) + geom_bar(stat='identity', fill="#7FB3D5", color="black") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#D5D8DC")) + 
+  geom_smooth(method="loess", color="red")
+
+organic_monthly <- organic %>% 
+  ggplot(aes(x=Date, y=AveragePrice)) + geom_line(color="#58D68D") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#D5D8DC")) + 
+  labs(title="Organic Avocados") + geom_hline(yintercept=max(organic$AveragePrice), linetype="dashed", color = "red") + 
+  geom_hline(yintercept=min(organic$AveragePrice), linetype="dashed", color = "blue")
+
+organic_volume <- organic %>%
+  ggplot(aes(x=Date, y=Total.Volume)) + geom_bar(stat='identity', fill="#58D68D",color="black") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#D5D8DC")) + geom_smooth(method="loess", color="red")
+
+plot_grid(conventional_monthly, organic_monthly,conventional_volume, organic_volume, nrow=2, ncol=2)
+```
+
+## Patterns
+### Type of Patterns
+- **Cyclical:** Fluctuations **do not happen** on a fixed frequency,
+- **Seasonal:** Fluctuations **do happen** on a fixed frequency.
+- **Trends:** This occurs when there is a **consistent increase or decrease** in our data.
+
+```{r echo=FALSE, message=FALSE}
+head(organic) %>% kable(caption ="Head records for Organic")
+```
+
+### Analyzing Seasonal Patterns:
+In this section we will try to find if there are any significant **reoccurring seasonal patterns**. By this I meant, if there are any repeating trends  in which the avocado price tend to increase. For instance, in May of each year we see that avocado prices tend to increase for some specific reason.
+
+**Summary**
+
+- **Distributions per year:** It looks that most of the prices in the year of 2015 were in the $1.00 for conventional avocados. While for 2016 and 2017 the density of the prices were a little bit higher.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+seasonal_df <- original_df
+
+seasonal_df$month_year <- format(as.Date(original_df$Date), "%Y-%m")
+seasonal_df$month <- format(as.Date(original_df$Date), "%m")
+seasonal_df$year <- format(as.Date(original_df$Date), "%Y")
+
+
+seasonal_df$monthabb <- sapply(seasonal_df$month, function(x) month.abb[as.numeric(x)])
+seasonal_df$monthabb = factor(seasonal_df$monthabb, levels = month.abb)
+
+
+# # Let's see if there are seasonal patterns with conventional avocadoes
+ggplot(seasonal_df, aes(x = AveragePrice, fill = as.factor(year))) + 
+  geom_density(alpha = .5) + 
+  theme_economist() +
+  facet_wrap(~ year) + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F")) + 
+  guides(fill = FALSE) + labs(title="Distribution of Prices by year", x = 'Average Price', y = 'Density') + 
+  scale_fill_manual(values=c("#2E64FE", "#40FF00", "#FE642E", "#FE2E2E"))
+```
+
+- **Price peaks per Month:** It looks that most price peaks occur for both conventional and organic avocados between the months of **September** and **October**.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Detecting seasonality patterns
+conv_patterns <- seasonal_df %>% select(monthabb, AveragePrice, type) %>% filter(type == "conventional") %>%
+  group_by(monthabb) %>% summarize(avg=mean(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=avg)) + geom_point(color="#F35D5D", aes(size=avg)) + geom_line(group=1, color="#7FB3D5") + 
+  theme_economist() + theme(legend.position="none", plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F")) + 
+  labs(title="Conventional Avocados", x="Month", y="Average Price")
+
+
+org_patterns <- seasonal_df %>% select(monthabb, AveragePrice, type) %>% filter(type == "organic") %>%
+  group_by(monthabb) %>% summarize(avg=mean(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=avg)) + geom_point(color="#F35D5D", aes(size=avg)) + geom_line(group=1, color="#58D68D") + 
+  theme_economist() + theme(legend.position="none", plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F")) + 
+  labs(title="Organic Avocados", x="Month", y="Average Price")
+
+plot_grid(conv_patterns, org_patterns, nrow=2)
+```
+
+- **Major drop in prices at the end of the year:** Interesting enough we see that at the end of the year there is a major price drop in the price of avocados. I wonder why that would be? What possible reason could there be to have a lower price at the end of each year.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Hmm let's see if the Seasonality pattern is maintained each year.
+options(repr.plot.width=8, repr.plot.height=6) 
+conv_pat_yearly <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(avg=mean(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=avg)) + geom_point(color="#5D6D7E") + geom_line(group=1, color="#F7DC6F") + facet_wrap(~as.factor(year)) + 
+  theme_minimal() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"), axis.text.x = element_text(angle = 90)) + 
+  labs(title="Seasonal Fluctuations \n Convenctional Avocados", x="Month", y="Average Price")
+
+org_pat_yearly <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(avg=mean(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=avg)) + geom_point(color="#5D6D7E") + geom_line(group=1, color="#E74C3C") + facet_wrap(~as.factor(year)) + 
+  theme_minimal() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"), axis.text.x = element_text(angle = 90)) + 
+  labs(title="Seasonal Fluctuations \n Organic Avocados", x="Month", y="Average Price")
+
+plot_grid(conv_pat_yearly, org_pat_yearly, nrow=2)
+```
+
+- **Standard deviation as a measure of volatility:** Standard deviation is just the square root of a variance. We can see that during the year of 2017, the avocado market experienced the highest volatility for both conventional and organic avocados.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Measuring standard deviation per month through each year by type of avocado.
+std_conv <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(std=sd(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=std)) + 
+  geom_point(aes(size=std), col="#5A96C6") +   # Draw points
+  geom_segment(aes(x=monthabb, 
+                   xend=monthabb, 
+                   y=min(std), 
+                   yend=max(std)), 
+               linetype="dashed", 
+               size=0.1) + 
+  coord_flip() + 
+  facet_wrap(~year) + 
+  theme_tufte() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"), legend.position="none") + 
+  labs(title="Conventional Avocados \n Price Volatility",x="Months", y="Standard Deviation")
+
+
+std_org <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(std=sd(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=std)) + 
+  geom_point(aes(size=std), col="#5AC67C") +   # Draw points
+  geom_segment(aes(x=monthabb, 
+                   xend=monthabb, 
+                   y=min(std), 
+                   yend=max(std)), 
+               linetype="dashed", 
+               size=0.1) + 
+  coord_flip() + 
+  facet_wrap(~year) + 
+  theme_tufte() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"), legend.position="none") + 
+  labs(title="Organic Avocados \n Price Volatility",x="Months", y="Standard Deviation")
+
+plot_grid(std_conv, std_org, nrow=2)
+```
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Let's have a closer look how the price changes per month.
+# filter by type and year
+
+options(repr.plot.width=10, repr.plot.height=8) 
+
+se <- function(x) sqrt(var(x)/length(x)) 
+
+conv <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% 
+  ggplot(aes(x=monthabb, y=AveragePrice, fill=monthabb), color="white") + geom_bar(width=1, stat='identity') + 
+  geom_errorbar(aes(ymin = AveragePrice - se(AveragePrice), 
+                    ymax = AveragePrice + se(AveragePrice), 
+                    color = monthabb), 
+                width = .2) + scale_y_continuous(breaks = 0:nlevels(seasonal_df$monthabb)) +
+  facet_wrap(~year) + theme_minimal() + 
+  theme(axis.ticks = element_blank(),
+        axis.text.y=element_blank(),
+        axis.title = element_blank(),
+        axis.line = element_blank(), 
+        plot.background=element_rect(fill="#FFF1E0"),
+        legend.position="none", plot.title=element_text(hjust=0.5)) + 
+  coord_polar() + labs(title="Seasonal cycle \n Conventional Avocados") + 
+  scale_fill_manual(values=c('#57FCE0', '#57A6FC', '#3C546E', '#4AFA76', '#95CFA4', '#C0E436', '#F2A42D', '#F25F2D', '#F2442D',
+                             '#AB4949', '#4950AB', '#4974AB'))
+
+
+org <- seasonal_df %>% select(year, monthabb, AveragePrice, type) %>% filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% 
+  ggplot(aes(x=monthabb, y=AveragePrice, fill=monthabb), color="white") + geom_bar(width=1, stat='identity') + 
+  geom_errorbar(aes(ymin = AveragePrice - se(AveragePrice), 
+                    ymax = AveragePrice + se(AveragePrice), 
+                    color = monthabb), 
+                width = .2) + scale_y_continuous(breaks = 0:nlevels(seasonal_df$monthabb)) +
+  facet_wrap(~year) + theme_minimal() + 
+  theme(axis.ticks = element_blank(),
+        axis.text.y=element_blank(),
+        axis.title = element_blank(),
+        axis.line = element_blank(), 
+        plot.background=element_rect(fill="#FFF1E0"),
+        legend.position="none", plot.title=element_text(hjust=0.5)) + 
+  coord_polar() + labs(title="Seasonal cycle \n Organic Avocados") + 
+  scale_fill_manual(values=c('#57FCE0', '#57A6FC', '#3C546E', '#4AFA76', '#95CFA4', '#C0E436', '#F2A42D', '#F25F2D', '#F2442D',
+                             '#AB4949', '#4950AB', '#4974AB'))
+
+
+
+grid.arrange(conv, org, nrow = 2)
+```
+
+
+- **Percent differences for conventional avocados:** Here we want to see if there is a percent increase from year to year when it comes to the average price per month of each type of avocado. From 2015 - 2016 we see that the conventional avocados had a lag in the first six months of the year, then it picked for the next six months. From 2016 - 2017 conventional avocados performed greatly in the year of 2017 as opposed to the year of 2016 when compared to the previous year which was 2016.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=10, repr.plot.height=7) 
+r_avg <- seasonal_df %>% group_by(year, monthabb) %>%  select(type, year, monthabb, AveragePrice) %>% 
+  filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>%
+  summarize(avg=mean(AveragePrice))
+
+
+
+structured_data <- spread_(r_avg, key="year", value="avg")
+
+
+colnames(structured_data) <- c("Months", "First_year", "Second_year", "Third_year")
+
+
+structured_data$first_pct <- NA
+structured_data$second_pct <- NA
+
+structured_data$first_pct <- (structured_data$Second_year - structured_data$First_year)/structured_data$First_year
+structured_data$second_pct <- (structured_data$Third_year - structured_data$Second_year)/structured_data$Second_year
+
+
+structured_data<- structured_data %>% 
+  mutate(first_cond=ifelse(first_pct > 0, "Positive", "Negative"),
+         second_cond=ifelse(second_pct > 0, "Positive", "Negative"))
+
+
+firstp_change <- ggplot(structured_data) +
+  geom_segment( aes(x=Months, xend=Months, y=First_year, yend=Second_year), color="#6E6A6A") +
+  geom_point( aes(x=Months, y=First_year), color="#F74B4B", size=3 ) +
+  geom_point( aes(x=Months, y=Second_year),color="#36ACD7", size=3 ) +
+  coord_flip()+ 
+  theme_economist() +
+  theme(
+    legend.position = "top",
+    plot.title=element_text(hjust=0.5),
+    plot.background=element_rect(fill="#F4F6F7")
+  ) +
+  labs(title="Conventional Avocado \n Price changes \n (2015 - 2016)", x="Months", y="Price",
+       caption="Red: Year of 2015, Blue: Year of 2016")
+
+
+secondp_change <- ggplot(structured_data) +
+  geom_segment( aes(x=Months, xend=Months, y=Second_year, yend=Third_year), color="#6E6A6A") +
+  geom_point( aes(x=Months, y=Second_year), color="#36ACD7", size=3 ) +
+  geom_point( aes(x=Months, y=Third_year), color="#58FA58", size=3 ) +
+  coord_flip()+ 
+  theme_economist() +
+  theme(
+    legend.position = "top",
+    plot.title=element_text(hjust=0.5),
+    plot.background=element_rect(fill="#F4F6F7")
+  ) +
+  labs(title="Conventional Avocado \n Price changes \n (2016 - 2017)", x="Months", y="Price",
+       caption="Blue: Year of 2016, Green: Year of 2017" )
+
+# plot_grid(firstp_change, secondp_change, ncol=2)
+
+first_pct_dif <- structured_data %>% select(Months, first_pct, first_cond) %>%
+  ggplot(aes(fill=first_cond)) + geom_bar(stat='identity', aes(x=Months, y=round(first_pct,2) * 100), color="black") + 
+  theme_economist() + theme(axis.text.x=element_text(angle=90), plot.background=element_rect(fill="#F4F6F7"), legend.position="bottom") + 
+  labs(x="Month", y="% Difference") + 
+  guides(fill=guide_legend(title="Diff Status")) + scale_fill_manual(values=c("#FB4D42", "#ADE175"))
+
+second_pct_dif <- structured_data %>% select(Months, second_pct, second_cond) %>%
+  ggplot(aes(fill=second_cond)) + geom_bar(stat='identity', aes(x=Months, y=round(second_pct,2) * 100), color="black") + 
+  theme_economist() + 
+  theme(axis.text.x=element_text(angle=90), plot.background=element_rect(fill="#F4F6F7"), legend.position="bottom") + labs(x="Month", y="% Difference") + 
+  guides(fill=guide_legend(title="Diff Status")) + scale_fill_manual(values=c("#FB4D42", "#ADE175"))
+
+
+
+plot_grid(firstp_change, secondp_change, first_pct_dif, second_pct_dif,  nrow=2, ncol=2)
+
+```
+
+- **Percent differences for organic avocados:** Now for organic avocados is a totally different story at least for the years 2015 - 2016. In 2016 organic avocados performed worst in almost all months as opposed to the previous year of 2015. Then it performed better in the year of 2017 in almost all the months of 2017 as opposed to the previous year of 2016.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Organic avvocados
+
+r_avg_org <- seasonal_df %>% group_by(year, monthabb) %>%  select(type, year, monthabb, AveragePrice) %>% 
+  filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>%
+  summarize(avg=mean(AveragePrice))
+
+
+
+structured_data_org <- spread_(r_avg_org, key="year", value="avg")
+
+
+colnames(structured_data_org) <- c("Months", "First_year", "Second_year", "Third_year")
+
+
+
+
+structured_data_org$first_pct <- NA
+structured_data_org$second_pct <- NA
+
+structured_data_org$first_pct <- (structured_data_org$Second_year - structured_data_org$First_year)/structured_data$First_year
+structured_data_org$second_pct <- (structured_data_org$Third_year - structured_data_org$Second_year)/structured_data$Second_year
+
+
+structured_data_org<- structured_data_org %>% 
+  mutate(first_cond=ifelse(first_pct > 0, "Positive", "Negative"),
+         second_cond=ifelse(second_pct > 0, "Positive", "Negative"))
+
+
+firstp_change_org <- ggplot(structured_data_org) +
+  geom_segment( aes(x=Months, xend=Months, y=First_year, yend=Second_year), color="#6E6A6A") +
+  geom_point( aes(x=Months, y=First_year), color="#F74B4B", size=3 ) +
+  geom_point( aes(x=Months, y=Second_year),color="#36ACD7", size=3 ) +
+  coord_flip()+ 
+  theme_economist() +
+  theme(
+    legend.position = "top",
+    plot.title=element_text(hjust=0.5),
+    plot.background=element_rect(fill="#DCFCE6")
+  ) +
+  labs(title="Organic Avocado \n Price changes \n (2015 - 2016)", x="Months", y="Price",
+       caption="Red: Year of 2015, Blue: Year of 2016")
+
+
+secondp_change_org <- ggplot(structured_data_org) +
+  geom_segment( aes(x=Months, xend=Months, y=Second_year, yend=Third_year), color="#6E6A6A") +
+  geom_point( aes(x=Months, y=Second_year), color="#36ACD7", size=3 ) +
+  geom_point( aes(x=Months, y=Third_year), color="#58FA58", size=3 ) +
+  coord_flip()+ 
+  theme_economist() +
+  theme(
+    legend.position = "top",
+    plot.title=element_text(hjust=0.5),
+    plot.background=element_rect(fill="#DCFCE6")
+  ) +
+  labs(title="Organic Avocado \n Price changes \n (2016 - 2017)", x="Months", y="Price",
+       caption="Blue: Year of 2016, Green: Year of 2017" )
+
+# plot_grid(firstp_change, secondp_change, ncol=2)
+
+first_pct_dif_org <- structured_data_org %>% select(Months, first_pct, first_cond) %>%
+  ggplot(aes(fill=first_cond)) + geom_bar(stat='identity', aes(x=Months, y=round(first_pct,2) * 100), color="black") + 
+  theme_economist() + theme(axis.text.x=element_text(angle=90), plot.background=element_rect(fill="#DCFCE6"), legend.position="bottom") + 
+  labs(x="Month", y="% Difference") + 
+  guides(fill=guide_legend(title="Diff Status")) + scale_fill_manual(values=c("#FB4D42", "#ADE175"))
+
+second_pct_dif_org <- structured_data_org %>% select(Months, second_pct, second_cond) %>%
+  ggplot(aes(fill=second_cond)) + geom_bar(stat='identity', aes(x=Months, y=round(second_pct,2) * 100), color="black") + 
+  theme_economist() + 
+  theme(axis.text.x=element_text(angle=90), plot.background=element_rect(fill="#DCFCE6"), legend.position="bottom") + labs(x="Month", y="% Difference") + 
+  guides(fill=guide_legend(title="Diff Status")) + scale_fill_manual(values=c("#FB4D42", "#ADE175"))
+
+
+
+plot_grid(firstp_change_org, secondp_change_org, first_pct_dif_org, second_pct_dif_org,  nrow=2, ncol=2)
+```
+
+- **2017 a good year for avocados:** Based on this trend, we can see that 2017 was a good year for avocados, would our forecast (later in this project) predict that it will do so in the year of 2018?
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=8, repr.plot.height=6) 
+
+# Let's create a seasonal column and plot a point line chart by each year.
+seasonal_df$season <- ifelse(seasonal_df$month %in% c("03", "04","05"), "Spring",
+                             ifelse(seasonal_df$month %in% c("06","07" ,"08"), "Summer",
+                                    ifelse(seasonal_df$month %in% c("09","10","11"), "Fall", "Winter")))
+
+
+seasonality.plot.conventional <- seasonal_df %>% select(season, year, AveragePrice, type) %>% 
+  filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(season, year) %>%
+  summarize(avg=mean(AveragePrice)) %>% ggplot(aes(x=season, y=avg, color=season)) + geom_point(size=3) + 
+  geom_segment(aes(x=season, 
+                   xend=season, 
+                   y=0, 
+                   yend=avg)) + 
+  coord_flip() + facet_wrap(~as.factor(year)) + theme_minimal() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7")) + 
+  scale_color_manual(values=c("#a06a31", "#9bd16b", "#d1706b", "#3bbf9e")) + 
+  labs(title="Conventional Avocados by Season", x="Season", y="Average Price") + 
+  geom_text(aes(x=season, y=0.01, label= paste0("$ ", round(avg,2))),
+            hjust=-0.5, vjust=-0.5, size=4, 
+            colour="black", fontface="italic",
+            angle=360)
+
+seasonality.plot.organic <- seasonal_df %>% select(season, year, AveragePrice, type) %>% 
+  filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(season, year) %>%
+  summarize(avg=mean(AveragePrice)) %>% ggplot(aes(x=season, y=avg, color=season)) + geom_point(size=3) + 
+  geom_segment(aes(x=season, 
+                   xend=season, 
+                   y=0, 
+                   yend=avg)) + 
+  coord_flip() + facet_wrap(~as.factor(year)) + theme_minimal() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7")) + 
+  scale_color_manual(values=c("#a06a31", "#9bd16b", "#d1706b", "#3bbf9e")) + 
+  labs(title="Organic Avocados by Season", x="Season", y="Average Price") + 
+  geom_text(aes(x=season, y=0.01, label= paste0("$ ", round(avg,2))),
+            hjust=-0.5, vjust=-0.5, size=4, 
+            colour="black", fontface="italic",
+            angle=360)
+
+
+plot_grid(seasonality.plot.conventional, seasonality.plot.organic, nrow=2)
+```
+
+**Formulas used for this section:**
+
+- **Percent increase Difference:** $$ \frac{Ending Value - Begining Value}{Begining Value} $$
+- **Standard Deviation:** $$ \sqrt {\frac{ \sum{|x - \overline{x}|^2}}{n}}  $$
+
+### Regional Analysis:
+
+In this phase of the exploratory data analysis we will analyze two main things the volume of avocados and price of the different types of avocados in each region. We will see the inverse correlation there is between supply and demand and how it affects price. Since we have 54 regions, we will use just a few to make note of this inverse correlation.
+
+Volume Price Difference = ***Volume of Avocados Produced*** -- ***Average Avocado Price***
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=8, repr.plot.height=7) 
+
+
+regions_monthabb <- seasonal_df %>% select(monthabb, Total.Volume) %>% 
+  group_by(monthabb) %>% summarize(avg.volume=mean(Total.Volume)) %>%
+  ggplot(aes(x=monthabb, y=avg.volume)) + geom_bar(stat="identity",  fill="#81FF5F") + 
+  coord_flip() + theme_minimal() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"))
+
+
+
+price_monthabb <- seasonal_df %>% select(monthabb, AveragePrice) %>% 
+  group_by(monthabb) %>% group_by(avg.price=mean(AveragePrice)) %>%
+  ggplot(aes(x=monthabb, y=avg.price))  + geom_bar(stat="identity", fill="#FF685F") + 
+  coord_flip() + theme_minimal() + 
+  theme(legend.position="none", plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7")) 
+
+
+# The higher the price, the lower the volume.
+seasonal_df$Volume_Price_Diff <- (seasonal_df$Total.Volume - seasonal_df$AveragePrice)
+
+# If the month is higher there is a higher volume and thus a lower price.
+volprice_diff <- seasonal_df %>% group_by(year, monthabb) %>% select(year, monthabb, type, Volume_Price_Diff) %>% 
+  filter(year == c("2015", "2016", "2017")) %>%
+  summarize(avg.diff=mean(Volume_Price_Diff)) %>%
+  ggplot(aes(x=monthabb, y=avg.diff, group=year, color=year)) + geom_area(aes(fill=year)) + theme_minimal() +
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"),
+        legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                                                   size=0.5, linetype="solid", 
+                                                                   colour ="black")) + 
+  scale_fill_manual(values=c("#6EB3EA", "#89F058", "#FBA31C")) + scale_color_manual(values=c("#407EAF","#68B842", "#F1711E"))
+
+
+
+pushViewport(viewport(layout = grid.layout(2, 2)))
+vplayout <- function(x, y) viewport(layout.pos.row = x, layout.pos.col = y)
+
+print(regions_monthabb, vp = vplayout(1, 1))
+print(price_monthabb, vp = vplayout(1, 2))
+print(volprice_diff, vp = vplayout(2, 1:2))
+```
+
+
+**Market Volume**
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+#Conventional Avocados
+volume_conv <- seasonal_df %>% select(year, monthabb, Total.Volume, region, type) %>% 
+  filter(type == "conventional", year == c("2015", "2016", "2017"), 
+         region == c("Northeast", "SouthCentral", "MidSouth", "Southeast", "West")) %>% 
+  group_by(year, monthabb, region) %>% summarize(avg.vol=mean(Total.Volume)) %>%
+  ggplot(aes(x=monthabb, y=avg.vol)) + geom_point(color="#5D6D7E") + geom_line(group=1, color="#FE642E") +
+  facet_grid(region ~ year)+ 
+  theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F2F5A9"), axis.text.x = element_text(angle = 90)) + 
+  labs(title="Market Volume \n Convenctional Avocados", x="Month", y="Average Volume")
+
+volume_conv
+
+#Organic Avocados
+volume_org <- seasonal_df %>% select(year, monthabb, Total.Volume, region, type) %>% 
+  filter(type == "organic", year == c("2015", "2016", "2017"), 
+         region == c("Northeast", "SouthCentral", "MidSouth", "Southeast", "West")) %>% 
+  group_by(year, monthabb, region) %>% summarize(avg.vol=mean(Total.Volume)) %>%
+  ggplot(aes(x=monthabb, y=avg.vol)) + geom_point(color="#5D6D7E") + geom_line(group=1, color="#819FF7") +
+  facet_grid(region ~ year)+ 
+  theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#E6E6E6"), axis.text.x = element_text(angle = 90)) + 
+  labs(title="Market Volume \n Organic Avocados", x="Month", y="Average Volume")
+
+volume_org
+
+```
+
+
+## Time Series Analysis
+
+### Using the Autoplot library for Time Series:
+The auto-plot library allows us to see patterns between the different years. In the chart below we can see the following:
+
+- Prices for 2017 were the highest overall.
+- There is an increase in avocado prices for both organic and conventional types.
+- The lowest price occurred in the year of 2015
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=10, repr.plot.height=8) 
+
+conv.price <- seasonal_df %>% select(type,year, monthabb, AveragePrice) %>% filter(type == "conventional", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(avg=mean(AveragePrice))
+
+org.price <- seasonal_df %>% select(type,year, monthabb, AveragePrice) %>% filter(type == "organic", year == c("2015", "2016", "2017")) %>%
+  group_by(year, monthabb) %>% summarize(avg=mean(AveragePrice))
+
+conv.price <- ts(conv.price$avg, start=2015, frequency=12)
+org.price <- ts(org.price$avg, start=2015, frequency=12)
+
+
+conv.plot <- autoplot(conv.price, color="#48a4ff") + 
+  theme_economist() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F")) + 
+  labs(title="Average Price by Month \n Conventional Avocados", y="Average Price")
+
+org.plot <- autoplot(org.price, color="#58FA82") + 
+  theme_economist() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F")) + 
+  labs(title="Average Price by Month \n Organic Avocados", y="Average Price")
+
+
+byyear.plot.conv <- ggseasonplot(conv.price, year.labels=TRUE, year.labels.left=TRUE) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F"), axis.text.x  = element_text(angle=90, hjust=1, vjust=0.9)) + 
+  labs(title="Average Conventional A.\n Price by Year \n for each month", y="Average Price") + 
+  scale_color_manual(values=c("#407EAF","#68B842", "#F1711E"))
+
+
+byyear.plot.org <- ggseasonplot(org.price, year.labels=TRUE, year.labels.left=TRUE) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F9E79F"), axis.text.x  = element_text(angle=90, hjust=1, vjust=0.9)) + 
+  labs(title="Average Organic A.\n Price by Year \n for each month", y="Average Price") + 
+  scale_color_manual(values=c("#407EAF","#68B842", "#F1711E"))
+
+
+plot_grid(conv.plot, byyear.plot.conv, org.plot, byyear.plot.org, nrow=2, ncol=2)
+```
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+polar.conv <- ggseasonplot(conv.price, polar=TRUE) +
+  ylab("Average Avocado Price") +
+  ggtitle("Conventional Avocados \n Polar Plot") + theme_minimal() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"),
+        legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                                                   size=0.5, linetype="solid", 
+                                                                   colour ="black")) + 
+  scale_color_manual(values=c("#407EAF","#68B842", "#F1711E"))
+
+
+polar.org <- ggseasonplot(org.price, polar=TRUE) +
+  ylab("Average Avocado Price") +
+  ggtitle("Organic Avocados \n Polar Plot") + theme_minimal() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"),
+        legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                                                   size=0.5, linetype="solid", 
+                                                                   colour ="black")) + 
+  scale_color_manual(values=c("#407EAF","#68B842", "#F1711E"))
+
+
+plot_grid(polar.conv, polar.org, ncol=2)
+```
+
+
+### Seasonal Subseries Plot:
+This is another form of analyzing the different trends per seasonality. Here is what you should know:
+
+- **Blue line:** Is the **mean** of the avocado month for a specific month.
+- **Black line:** It is a way to see the **fluctuations** throughout each month.
+
+**Summary**
+
+- **Upward Trend:** The most significant upward trend happens between June - September for organic avocados and June - October for conventional avocado types. Both types of avocados have a similar trend.
+- **Most expensive months to buy avocados:** Like in the previous analysis, through this visualization we confirm that the months with the highest average price are September and October however, August is pretty expensive as well.
+- **What does this graph tell us?** For each month we have three peaks. That represents the highest peak in each month of each year. Since we are using the prices of 2015, 2016, and 2017 we can see how the price of each year behave in all twelve month. This will help us see if there are any major seasonal patterns. Also, we can see how the average change behaves, allowing us to see if there are any major trends in each month.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Now there are other ways to see the trends by month
+options(repr.plot.width=8, repr.plot.height=6) 
+
+
+monthly_conventional <- ggsubseriesplot(conv.price) +
+  labs(title="Conventional Avocados", x="Months", y="Average Price") + 
+  theme_economist() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#FEF5C7")) + 
+  annotate("text", x = c(6), y = c(1.35), label = c("Upward trend \n (June - October)") , color="black", size=2.5 , angle=360, fontface="bold") + 
+  geom_segment(aes(x = c(6) , y = 1.3, xend = c(6.5), yend = 1.2), colour='#D6665E', size=1,arrow = arrow(length = unit(0.35, "cm")))
+
+monthly_organic <- ggsubseriesplot(org.price) +
+  labs(title="Organic Avocados", x="Months", y="Average Price") + 
+  theme_economist() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#FEF5C7")) + 
+  annotate("text", x = c(6), y = c(1.85), label = c("Upward trend \n (June - September)") , color="black", size=2.5 , angle=360, fontface="bold") + 
+  geom_segment(aes(x = c(6) , y = 1.8, xend = c(6.5), yend = 1.7), colour='#D6665E', size=1,arrow = arrow(length = unit(0.35, "cm")))
+
+
+plot_grid(monthly_conventional, monthly_organic, nrow=2)
+```
+
+### Stationary Time Series:
+
+**Auto-Correlations:**
+
+- **What does the autocorrelation graph tells us?**
+-**What can we conclude about the autocorrelation?**
+
+#### Autocorrelation Formula:
+
+$$
+r_k = \frac {\sum_{t = k+1}^{T}{(y_t - \overline{y})(y_{t-k} - \overline{y})} }{\sum_{t = k+1}^{T}{(y_t - \overline{y})^2}}
+$$
+
+### Auto-Correlations
+Auto-correlations helps us determine if there are certain patterns in our data. So what is the main purpose of using Auto-correlations and how could it help us determine certain patterns in our time series dataset? First thing, the word "Auto" gives us a hint that we are planning to use an internal correlation. What does internal correlation mean? We basically are taking a specific date (in the example below we use January) and we want to see whether the price of avocados have some sort of correlation with the price of January. In the first visualization, lags are a representation of months. So we can see that the correlation is higher the closer the month is from January/ This means that the price of February are similar to the avocado prices of January. As the months pass by, the correlation as opposed to the month of January gets lower indicating to us that there are no specific patterns to the month of January. Price movements in those months except for February and March do not have highly correlated prices compared to the prices of January.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="90%"}
+options(repr.plot.width=10, repr.plot.height=6)
+
+seasonality_trends_conv <- window(conv.price, start=2015)
+conv_plot_trends <- autoplot(seasonality_trends_conv) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#F4F6F7")) + 
+  labs(x="Year", y="Average Price", title="Conventional Avocados")
+
+autocoor_conv <- ggAcf(org.price, lag=12) + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#F4F6F7")) + labs(title="Autocorrelation for \n Conventional Avocados")
+
+
+seasonality_trends_org <- window(org.price, start=2015)
+org_plot_trends <- autoplot(seasonality_trends_org) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#F4F6F7")) + 
+  labs(x="Year", y="Average Price", title="Organic Avocados")
+
+autocoor_org <- ggAcf(org.price, lag=12) + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#F4F6F7")) + labs(title="Autocorrelation for \n Organic Avocados")
+
+plot_grid(conv_plot_trends, autocoor_conv, org_plot_trends, autocoor_org, ncol=2, nrow=2)
+```
+
+#### Weekly Auto-Correlations:
+\
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=10, repr.plot.height=6)
+
+# Let's get it by week the average price
+weekly_df <- original_df
+weekly_df$week <- format(as.Date(original_df$Date), "%w")
+
+conv.price.weekly <- weekly_df %>% select(type,year,AveragePrice) %>% filter(type == "conventional", year == c("2015", "2016", "2017")) 
+org.price.weekly <- weekly_df %>% select(type,year,AveragePrice) %>% filter(type == "organic", year == c("2015", "2016", "2017")) 
+
+
+weekly.conv.price <- ts(conv.price.weekly$AveragePrice, start=2015, frequency=12)
+weekly.org.price <- ts(org.price.weekly$AveragePrice, start=2015, frequency=12)
+
+
+
+weekly_trends_conv <- window(weekly.conv.price, start=2015)
+
+weekly_trends_org <- window(weekly.org.price, start=2015)
+
+conv_plot_weekly <- autoplot(weekly_trends_conv) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#FFF1E0")) + 
+  labs(x="Time", y="Average Price", title="Conventional Avocados \n (Weekly Time Series)")
+
+org_plot_weekly <- autoplot(weekly_trends_org) + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#FFF1E0")) + 
+  labs(x="Time", y="Average Price", title="Organic Avocados \n (Weekly Time Series)")
+
+autocoor_conv <- ggAcf(weekly.conv.price, lag=156, fill="#48a4ff") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#FFF1E0")) + 
+  labs(title="Autocorrelations by Weekly Lags")
+
+autocoor_org <- ggAcf(weekly.org.price, lag=156, fill="#48a4ff") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, size=12), plot.background=element_rect(fill="#FFF1E0")) + 
+  labs(title="Autocorrelations by Weekly Lags")
+
+plot_grid(conv_plot_weekly, autocoor_conv,org_plot_weekly,  autocoor_org, ncol=2, nrow=2)
+```
+
+## Type Series Forecasting
+
+### Forecasting Methods:
+In this section we will use various models to come up with accurate predictions in order to see what will the upcoming patterns will be for avocado prices.
+
+The list of models we will use include:
+
+- Smoothing Moving Average
+- Seasonal Naive Method
+- Drift Method
+- ARIMA
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# Using Smoothing average
+sma_conv <- sma(conventional$AveragePrice, h=10, silent=FALSE) + theme_economist()
+```
+
+### Using Naive and Drift Methods:
+Before explaining how these types of forecasting models work there are a couple of things that we must understand:
+
+- **Average Method:** This is just the average line of the last three years that we are analyzing. These years are 2015, 2016 and 2017. This will give us a fix value however, this value is important. When we talk about technical analysis, whenever prices go below the average line we are "expected" to see a downward trend.
+- **Naive Method:** Is just setting all forecast values to the last value we saw. You can see that the blue line is at the same level of the last price in December. That explain why it is so low! Since the avocado price was so low for both conventional and organic avocados, this could have a similar functionality to a support line. If we see prices going below this line, it could indicate a new downward trend.
+- **Seasonal Naive Method:** This will equal to the last value of the past year. So for instance if we are using monthly data, our forecast in january will be equivalent to the last January value of the year of 2018.
+- **Drift Method:** This will better detect the pattern of prices since it will use the average change of the historical data as a point of reference when it comes to forecasting. It is most likely, that this forecast will understand the trend however, it will ignore any seasonality patterns.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+library(fpp2)
+
+
+# Let's declare our data as time series
+conv <- df %>% select(Date, AveragePrice, type) %>% filter(type == "conventional")
+org <- df %>% select(Date, AveragePrice, type) %>% filter(type == "organic")
+# Organic Avocados
+conventional <- as_tbl_time(conv, index=Date)
+conventional <- as_period(conventional, '1 month')
+conventional$type <- NULL
+# Organic Avocados
+organic <- as_tbl_time(org, index=Date)
+organic <- as_period(organic, '1 month')
+organic$type <- NULL
+
+conv_ts <- ts(conventional[,2], start=c(2015, 1), frequency=12)
+org_ts <- ts(organic[,2], start=c(2015, 1), frequency=12)
+# The difference from month to month
+# To remove the trend we take the first difference
+differences_conv <- diff(conv_ts)
+
+main_diff <- autoplot(differences_conv) + theme_minimal()
+
+seasonality_diff <- ggseasonplot(differences_conv) + theme_minimal()
+
+plot_grid(main_diff, seasonality_diff, nrow=2)
+```
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+# ARIMA Model
+# Y has trend unlike difference, it will take the difference behind the scenes d=1
+# Stepwise will only use some models instead of all possible combinations
+# approximation uses the model that approximates the best result to save time
+arima_model_cv <- auto.arima(conv_ts, d=1, D=1, stepwise=FALSE, approximation=FALSE, trace=TRUE)
+arima_model_or <- auto.arima(org_ts, d=1, D=1, stepwise=FALSE, approximation=FALSE, trace=TRUE)
+
+
+print(summary(arima_model_cv))
+checkresiduals(arima_model_cv) + theme_minimal()
+```
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+options(repr.plot.width=10, repr.plot.height=7)
+
+conv_forecast_sn <- autoplot(conv_ts) +
+  autolayer(meanf(conv_ts, h=24),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(conv_ts, h=24),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(conv_ts, h=24),
+            series="Seasonal naïve", PI=FALSE) +
+  ggtitle("Conventional Avocado \n Seasonal Naive Method") +
+  xlab("Date") + ylab("Price") + scale_color_manual(values=c("#FA5858", "#00BFFF", "#FF8000")) + 
+  guides(colour=guide_legend(title="Forecast"))  + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"))
+
+org_forecast_sn <- autoplot(org_ts) +
+  autolayer(meanf(org_ts, h=24),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(org_ts, h=24),
+            series="Naïve", PI=FALSE) +
+  autolayer(snaive(org_ts, h=24),
+            series="Seasonal naïve", PI=FALSE) +
+  ggtitle("Organic Avocado \n Seasonal Naive Method") +
+  xlab("Date") + ylab("Price") + scale_color_manual(values=c("#FA5858", "#00BFFF", "#FF8000")) + 
+  guides(colour=guide_legend(title="Forecast"))  + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#DCFCE6"), legend.position="none")
+
+
+plot_grid(conv_forecast_sn, org_forecast_sn, nrow=2)
+```
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+conv_forecast_dr <- autoplot(conv_ts) +
+  autolayer(meanf(conv_ts, h=24),
+            series="Mean", PI=FALSE) +
+  autolayer(naive(conv_ts, h=24),
+            series="Naïve", PI=FALSE) +
+  autolayer(rwf(conv_ts, drift=TRUE, h=24),
+            series="Drift", PI=FALSE) +
+  ggtitle("Conventional Avocado \n Drift Method") +
+  xlab("Date") + ylab("Price") + scale_color_manual(values=c("#ffff24", "#98fb98", "#ff6347")) + 
+  guides(colour=guide_legend(title="Forecast"))  + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"))
+
+org_forecast_dr <- autoplot(org_ts) +
+  autolayer(meanf(org_ts, h=24),
+            series="Mean", PI=FALSE) +
+  autolayer(rwf(org_ts, h=24),
+            series="Naïve", PI=FALSE) +
+  autolayer(rwf(org_ts, drift=TRUE, h=24),
+            series="Drift", PI=FALSE) +
+  ggtitle("Organic Avocado \n Drift Method") +
+  xlab("Date") + ylab("Price") + scale_color_manual(values=c("#ffff24", "#98fb98", "#ff6347")) + 
+  guides(colour=guide_legend(title="Forecast"))  + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#DCFCE6"), legend.position="none")
+
+plot_grid(conv_forecast_dr, org_forecast_dr, nrow=2)
+```
+
+### Understanding Residuals
+Residuals is not only used to understand the difference ebtween our forecast model and actual values, it also tells us some potential for "abnormal" movements during certain period. Let's explore the charts below for both conventional and organic avocados. Here are my findings:
+
+- **Conventional Avocados:** There are two abnormal peaks in the conventional avocados chart. This might indicate abnormal movements in prices that could indicate that this was due to some extraordinary event.
+- **Organic Avocados:** We see some peaks in organic avocados but not to the extent of conventional avocados. Nevertheless, there are some abnormal peaks that should be further evaluated.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+rescv_nv <- residuals(naive(conv_ts))
+p1 <- autoplot(rescv_nv, color="#b6ff6c") + xlab("Day") + ylab("") +
+  ggtitle("Residuals from naïve method \n Conventional Avocados") + theme_economist() +
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"),  
+        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+        axis.title=element_text(colour="white"))
+
+
+resorg_nv <- residuals(naive(org_ts))
+p2 <- autoplot(resorg_nv, color="#ffee6c") + xlab("Day") + ylab("") +
+  ggtitle("Residuals from naïve method \n Organic Avocados") + theme_economist() + 
+  theme(plot.title=element_text(hjust=0.5, color="white"), plot.background=element_rect(fill="#0D7680"), 
+        axis.text.x=element_text(colour="white"), axis.text.y=element_text(colour="white"),
+        axis.title=element_text(colour="white"))
+
+plot_grid(p1, p2, nrow=2)
+```
+
+### Understanding ARIMA Model:
+
+- **Auto Regressive (AR):** Means that past time points could have a certain degree of current and future time observations. The ARIMA model takes into account lagged observations in order to come up with forecast observations. A weight is added to past observations however, the weight can vary on how recent the past observations are. The more recent, the more weight is added to the most recent past observation.
+- **Integrated (I):** If there are consistent trends in the movement of past prices, it is most likely to be non-stationary meaning that seasonality persists in past movement of prices. Integrated removes the seasonality phase of our dataset in case there are consistent patterns that show that this is the case. The degree of differencing available in ARIMA models eliminates the seasonality trend issue.
+- **Moving Average (MA):** Moving average helps remove the effect of random movements of avocado prices in our case. If there was an extraordinary event that led to a surge in avocado prices, moving average will help us "smooth" things up and our time series model will not be prone to these fluctuations.
+
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+sqrt(0.05354)
+
+forecast_cv <- forecast(arima_model_cv, h=24)
+# Include means including the last 60 months in order to see closer the forecast.
+autoplot(forecast_cv, include=60) + theme_minimal() + theme(plot.title=element_text(hjust=0.5), plot.background=element_rect(fill="#F4F6F7"),
+                                                            legend.position="bottom", legend.background = element_rect(fill="#FFF9F5",
+                                                                                                                       size=0.5, linetype="solid", 
+                                                                                                                       colour ="black")) + 
+  labs(title="Forecasting using ARIMA model \n Conventional Avocados", x="Date", y="Price")
+```
+```{r echo=FALSE, message=FALSE, split=FALSE, fig.align = 'default', warning = FALSE, out.width="100%"}
+print(summary(forecast_cv))
+```
+
+## Conclusion
+When it comes to to the analysis we have implemented there are several observations we have observed:
+
+- **Expensive Organic Avocados:** As expected, we have noticed that organic avocados are much more expensive than conventional avocados.
+- **Similar patterns by type:** There are some distinguishable patterns between the two types of avocados however, we see that most patterns are similar between these two types of avocados.
+- **Year 2017:** The year of 2017 was the best year of avocados. One of the factors that could have contributed was the well being of the economy as a whole but there could also be other hidden factors that could affect avocado prices in the market.
+- **Volatility:** Although, 2017 was the year with the highest prices, it was also the year with the highest volatility. This means that price fluctuations were higher in this year as oppose to the past two years.
+- **Buy avocados before fall!:** We see a consistent pattern of avocado prices increasing when fall is coming. This applies to both conventional and organic avocados.
+- **Downward trend in the long run:** Based on our ARIMA model, for both types of avocados we expect a downward trend in prices at least in the long run. There could be some upward pressure in the short run however, our model predicts that both avocado prices will go downwards 2 years from now.
