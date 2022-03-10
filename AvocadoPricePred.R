@@ -52,11 +52,11 @@ df <- read.csv("../RProjects/data/avocado.csv")
 
 original_df <- df
 
-#Types of Avacados
+#Types of Avocados
 levels(factor(df$type))
 
 
-#Avacado Price by Type chart
+#Avocado Price by Type chart
 options(repr.plot.width=8, repr.plot.height=4)
 
 ggplot(df, aes(x=AveragePrice, fill=type)) + geom_density() + facet_wrap(~type) + theme_minimal() + 
