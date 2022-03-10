@@ -46,9 +46,9 @@ library(fpp2)
 
 
 
-list.files(path = "../AvacadoPricePattern")
+list.files(path = "../RProjects")
 
-df <- read.csv("../AvacadoPricePattern/data/avocado.csv")
+df <- read.csv("../RProjects/data/avocado.csv")
 
 original_df <- df
 
